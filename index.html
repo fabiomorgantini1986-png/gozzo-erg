@@ -40,7 +40,10 @@ canvas{width:100%;height:200px;display:block;background:#0e2a42;border-radius:12
     <label>Il tuo nome</label>
     <input id="inNome" list="nomi" placeholder="Es. Laura" autocomplete="off">
     <datalist id="nomi"></datalist>
+    <label style="display:block;margin-top:10px">PIN</label>
+    <input id="inPinLogin" type="password" inputmode="numeric" autocomplete="off">
     <button id="btEntra">Entra</button>
+    <p id="msgL" class="warn"></p>
     <p id="noBt" class="warn hide">Questo browser non supporta il Bluetooth web. Usa Chrome su Android (la modalità Simulazione funziona comunque).</p>
   </div>
   <div class="card hide">
@@ -92,8 +95,6 @@ canvas{width:100%;height:200px;display:block;background:#0e2a42;border-radius:12
 <section id="vCoach" class="hide">
   <div class="row" style="align-items:center"><h1>Area allenatore</h1><button class="sec" id="btEsci2" style="flex:0 0 90px;margin:0;padding:8px">Esci</button></div>
   <div class="card">
-    <label>PIN allenatore</label>
-    <input id="inPin" type="password" inputmode="numeric">
     <button id="btScarica">Scarica tutti i dati (CSV)</button>
     <p id="msgC" class="st"></p>
   </div>
@@ -101,7 +102,6 @@ canvas{width:100%;height:200px;display:block;background:#0e2a42;border-radius:12
 </section>
 
 <script>
-const ALLENATORE = ['allenatore','fabio','coach'];   // nomi che aprono l'area allenatore
 const UUID = s => `ce06${s}-43e5-11e4-916c-0800200c9a66`;
 const LBS_N = 4.44822;
 const ARCHIVIO = 'https://script.google.com/macros/s/AKfycbwWpEoD0zzUtwhO6qPiGBD6RHDZ3H0mOXZ9O0qnFFzzj2RPAWy_TxtUKqCt9vi_Yz9T9Q/exec';
@@ -121,20 +121,30 @@ $('inUrl').value = ls.get('url','');
 $('inUrl').onchange = e => ls.set('url', e.target.value.trim());
 $('nomi').innerHTML = ls.get('nomi',[]).map(n=>`<option value="${n.replace(/"/g,'')}">`).join('');
 if(!navigator.bluetooth) $('noBt').classList.remove('hide');
-$('btEntra').onclick = () => {
-  const n = $('inNome').value.trim(); if(!n) return;
-  ls.set('url', $('inUrl').value.trim());
-  const nomi = ls.get('nomi',[]); if(!nomi.includes(n)){nomi.push(n);ls.set('nomi',nomi)}
-  ls.set('utente', n); entra(n);
+async function chiama(dati){
+  const r=await fetch(ls.get('url',''),{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(dati)});
+  return r.json();
+}
+$('btEntra').onclick = async () => {
+  const n=$('inNome').value.trim(), p=$('inPinLogin').value.trim(); if(!n||!p) return;
+  $('msgL').textContent='Verifica…'; $('btEntra').disabled=true;
+  try{
+    const j=await chiama({action:'login',nome:n,pin:p});
+    if(!j.ok) throw new Error(j.err||'accesso negato');
+    const nomi=ls.get('nomi',[]); if(!nomi.includes(j.nome)){nomi.push(j.nome);ls.set('nomi',nomi)}
+    ls.set('utente',{nome:j.nome,pin:p,ruolo:j.ruolo}); $('msgL').textContent=''; entra(ls.get('utente'));
+  }catch(e){ $('msgL').textContent='⚠️ '+e.message+' (serve la connessione internet)'; }
+  $('btEntra').disabled=false;
 };
-function entra(n){
-  utente=n; $('vLogin').classList.add('hide');
-  if(ALLENATORE.includes(n.toLowerCase())){ $('vCoach').classList.remove('hide'); return; }
-  $('vAtleta').classList.remove('hide'); $('hNome').textContent=n; disegnaLista(); disegna();
+let pin='';
+function entra(u){
+  utente=u.nome; pin=u.pin; $('vLogin').classList.add('hide');
+  if(u.ruolo==='allenatore'){ $('vCoach').classList.remove('hide'); return; }
+  $('vAtleta').classList.remove('hide'); $('hNome').textContent=utente; disegnaLista(); disegna();
 }
 function esci(){ if(sess) return alert('Termina prima la sessione.'); ls.set('utente',null); location.reload(); }
 $('btEsci').onclick=esci; $('btEsci2').onclick=esci;
-const u0=ls.get('utente',null); if(u0) entra(u0);
+const u0=ls.get('utente',null); if(u0 && u0.pin) entra(u0); else ls.set('utente',null);
 
 // ---------- BLUETOOTH PM5 ----------
 $('btConn').onclick = async () => {
@@ -257,8 +267,7 @@ async function invia(id){
   if(!url){ msg('Salvata sul telefono. Nessun archivio impostato: scarica il CSV.'); return; }
   msg('Invio all\'archivio…');
   try{
-    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({session:s})});
-    const j=await r.json(); if(!j.ok) throw new Error(j.err||'errore');
+    const j=await chiama({action:'salva',nome:utente,pin,session:s}); if(!j.ok) throw new Error(j.err||'errore');
     s.inviata=true; ls.set('sessioni',arr); msg('✅ Sessione inviata ('+s.colpi.length+' colpi).');
   }catch(e){ msg('⚠️ Invio non riuscito ('+e.message+'). È salvata sul telefono: riprova dalla lista.'); }
   disegnaLista();
@@ -294,7 +303,7 @@ $('btScarica').onclick = async () => {
   if(!url){ $('msgC').textContent='Imposta prima l\'indirizzo archivio nella schermata di accesso.'; return; }
   $('msgC').textContent='Scarico…';
   try{
-    const r=await fetch(url+'?pin='+encodeURIComponent($('inPin').value)); const j=await r.json();
+    const j=await chiama({action:'scarica',nome:utente,pin});
     if(!j.ok) throw new Error(j.err);
     const righe=j.rows; scarica(righe.map(x=>x.map(q).join(',')).join('\n'),`erg_tutte_${new Date().toISOString().slice(0,10)}.csv`);
     const sess={}; righe.slice(1).forEach(x=>{const k=x[0]; sess[k]=sess[k]||{a:x[1],i:x[2],n:0,w:0,p:0}; sess[k].n++; sess[k].w=Math.max(sess[k].w,+x[8]||0); sess[k].p=Math.max(sess[k].p,+x[9]||0);});
