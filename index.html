@@ -71,6 +71,7 @@ canvas{width:100%;height:200px;display:block;background:#0e2a42;border-radius:12
       <div class="m"><b id="vPos">–</b><span>Picco a % passata</span></div>
       <div class="m"><b id="vRat">–</b><span>Media/Picco</span></div>
       <div class="m"><b id="vLen">–</b><span>Passata (cm)</span></div>
+      <div class="m" style="grid-column:1/-1"><b id="vHr">–</b><span>❤️ Battiti (bpm)</span></div>
     </div>
   </div>
   <div class="card">
@@ -98,6 +99,12 @@ canvas{width:100%;height:200px;display:block;background:#0e2a42;border-radius:12
     <button id="btScarica">Scarica tutti i dati (CSV)</button>
     <p id="msgC" class="st"></p>
   </div>
+  <div class="card">
+    <label>Svuota l'archivio</label>
+    <p class="st">Prima viene scaricata una copia completa in CSV, poi i dati vengono cancellati dal Foglio Google. L'operazione non si può annullare.</p>
+    <button id="btCancella" style="background:var(--bad);color:#fff">Cancella tutti i dati</button>
+    <p id="msgX" class="st"></p>
+  </div>
   <div class="card list" id="riepilogo"></div>
 </section>
 
@@ -108,11 +115,24 @@ const ARCHIVIO = 'https://script.google.com/macros/s/AKfycbwWpEoD0zzUtwhO6qPiGBD
 const $ = id => document.getElementById(id);
 const ls = {
   get(k,d){if(k==='url')return ARCHIVIO;try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},
-  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}}
 };
+// Tiene sul telefono tutte le sessioni non inviate; quelle già inviate solo per 3 giorni (max 5).
+function salvaSessioni(arr){
+  const lim=Date.now()-3*864e5; let inviate=0;
+  let tieni=arr.filter(s=>!s.inviata || (new Date(s.fine||s.inizio).getTime()>lim && ++inviate<=5));
+  while(!ls.set('sessioni',tieni)){
+    const i=tieni.map(s=>s.inviata).lastIndexOf(true);
+    if(i<0){ msg('⚠️ Memoria del telefono piena: invia le sessioni in attesa appena c\'è rete.'); return false; }
+    tieni.splice(i,1);
+  }
+  return true;
+}
 
 let utente=null, dev=null, simTimer=null, wake=null;
 let sess=null;               // sessione in registrazione
+let ultimoColpo=0, pausaInviata=false;
+const inCorso=new Set();
 let last=null, pendingCurve=null, curveBuf=[], curveSeq=-1, curveTot=0;
 let spm=0, hr=0, ultimi=[];
 
@@ -140,7 +160,7 @@ let pin='';
 function entra(u){
   utente=u.nome; pin=u.pin; $('vLogin').classList.add('hide');
   if(u.ruolo==='allenatore'){ $('vCoach').classList.remove('hide'); return; }
-  $('vAtleta').classList.remove('hide'); $('hNome').textContent=utente; disegnaLista(); disegna();
+  $('vAtleta').classList.remove('hide'); $('hNome').textContent=utente; disegnaLista(); disegna(); recupera(); inviaInAttesa();
 }
 function esci(){ if(sess) return alert('Termina prima la sessione.'); ls.set('utente',null); location.reload(); }
 $('btEsci').onclick=esci; $('btEsci2').onclick=esci;
@@ -173,10 +193,11 @@ async function notifica(svc,id,fn){
 }
 const u24=(d,o)=>d.getUint8(o)|(d.getUint8(o+1)<<8)|(d.getUint8(o+2)<<16);
 
-function onStatus(d){ spm=d.getUint8(5); const h=d.getUint8(6); hr=h===255?0:h; $('vSpm').textContent=spm||'–'; }
+function onStatus(d){ spm=d.getUint8(5); const h=d.getUint8(6); hr=h===255?0:h; $('vSpm').textContent=spm||'–'; $('vHr').textContent=hr||'–'; }
 
 function onStroke(d){            // 0x0035: dati del colpo
   const n=d.getUint16(18,true);
+  if(sess && sess.colpi.length && sess.colpi[sess.colpi.length-1].n===n && !(last && last.n===n)) return;
   const k={n, t:u24(d,0)/100, dist:u24(d,3)/10, lung:d.getUint8(6)/100, drive:d.getUint8(7)/100,
     rec:d.getUint16(8,true)/100, dpc:d.getUint16(10,true)/100,
     picco:+(d.getUint16(12,true)/10*LBS_N).toFixed(1), media:+(d.getUint16(14,true)/10*LBS_N).toFixed(1),
@@ -226,7 +247,8 @@ function mostra(k){
 function chiudiColpo(k){
   deriva(k);
   if(k.curva){ ultimi.push(k.curva); if(ultimi.length>10) ultimi.shift(); }
-  if(sess){ const {at,...r}=k; sess.colpi.push(r); $('vN').textContent=sess.colpi.length; }
+  if(sess){ const {at,...r}=k; sess.colpi.push(r); $('vN').textContent=sess.colpi.length;
+    ultimoColpo=Date.now(); pausaInviata=false; ls.set('sessCorr',sess); }
 }
 
 // ---------- GRAFICO CURVA ----------
@@ -249,27 +271,55 @@ function disegna(){
 // ---------- SESSIONE ----------
 $('btStart').onclick = async () => {
   sess={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6), atleta:utente, inizio:new Date().toISOString(), nota:'', colpi:[]};
-  ultimi=[]; $('vN').textContent=0; $('btStart').disabled=true; $('btStop').disabled=false; msg('Registrazione in corso…');
+  if(last){ last=null; } ultimi=[]; $('vN').textContent=0; $('btStart').disabled=true; $('btStop').disabled=false; msg('Registrazione in corso…');
   try{ wake=await navigator.wakeLock?.request('screen'); }catch(e){}
-  const t0=Date.now(); sess.timer=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('vT').textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0')},1000);
+  const t0=Date.now(); ultimoColpo=t0; pausaInviata=false;
+  sess.timer=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('vT').textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+    if(last && Date.now()-last.at>5000){ chiudiColpo(last); last=null; }
+    if(sess && sess.colpi.length && !pausaInviata && Date.now()-ultimoColpo>30000){ pausaInviata=true; salvaParziale(); }
+  },1000);
 };
 $('btStop').onclick = async () => {
   if(last) { chiudiColpo(last); last=null; }
   clearInterval(sess.timer); delete sess.timer; sess.nota=$('inNota').value.trim(); sess.fine=new Date().toISOString();
-  const s=sess; sess=null; try{wake?.release()}catch(e){}
+  const s=sess; sess=null; ls.set('sessCorr',null); try{wake?.release()}catch(e){}
   $('btStop').disabled=true; $('btStart').disabled=!(dev?.gatt?.connected||simTimer);
   if(!s.colpi.length){ msg('Nessun colpo registrato.'); return; }
-  s.inviata=false; const arr=ls.get('sessioni',[]); arr.unshift(s); ls.set('sessioni',arr.slice(0,40));
+  s.inviata=false; const arr=ls.get('sessioni',[]); arr.unshift(s); salvaSessioni(arr);
   await invia(s.id); disegnaLista();
 };
+async function salvaParziale(){
+  if(!sess) return; const copia=JSON.parse(JSON.stringify(sess)); delete copia.timer;
+  try{ const j=await chiama({action:'salva',nome:utente,pin,session:copia});
+    msg(j.ok?'💾 Pausa: salvati automaticamente '+copia.colpi.length+' colpi. Continua pure o premi Fine e salva.':'⚠️ Salvataggio automatico non riuscito: i colpi restano sul telefono.');
+  }catch(e){ msg('⚠️ Senza rete: i colpi restano sul telefono e verranno inviati dopo.'); }
+}
+function recupera(){
+  const sc=ls.get('sessCorr',null); if(!sc || sc.atleta!==utente) return;
+  ls.set('sessCorr',null); if(!sc.colpi || !sc.colpi.length) return;
+  delete sc.timer; sc.fine=sc.fine||new Date().toISOString(); sc.nota=(sc.nota?sc.nota+' ':'')+'(recuperata)'; sc.inviata=false;
+  const arr=ls.get('sessioni',[]); arr.unshift(sc); salvaSessioni(arr);
+  msg('Recuperata la sessione interrotta ('+sc.colpi.length+' colpi), invio in corso…'); invia(sc.id);
+}
+async function inviaInAttesa(){
+  if(!utente || !pin || !navigator.onLine) return;
+  const attesa=ls.get('sessioni',[]).filter(s=>!s.inviata && s.atleta===utente);
+  for(const s of attesa) await invia(s.id);
+}
+window.addEventListener('online', inviaInAttesa);
+setInterval(inviaInAttesa, 120000);
 async function invia(id){
-  const url=ls.get('url',''); const arr=ls.get('sessioni',[]); const s=arr.find(x=>x.id===id);
+  if(inCorso.has(id)) return; inCorso.add(id);
+  try{ await inviaUna(id); } finally { inCorso.delete(id); }
+}
+async function inviaUna(id){
+  const url=ls.get('url',''); const arr=ls.get('sessioni',[]); const s=arr.find(x=>x.id===id); if(!s) return;
   if(!url){ msg('Salvata sul telefono. Nessun archivio impostato: scarica il CSV.'); return; }
   msg('Invio all\'archivio…');
   try{
     const j=await chiama({action:'salva',nome:utente,pin,session:s}); if(!j.ok) throw new Error(j.err||'errore');
-    s.inviata=true; ls.set('sessioni',arr); msg('✅ Sessione inviata ('+s.colpi.length+' colpi).');
-  }catch(e){ msg('⚠️ Invio non riuscito ('+e.message+'). È salvata sul telefono: riprova dalla lista.'); }
+    s.inviata=true; salvaSessioni(arr); msg('✅ Sessione inviata ('+s.colpi.length+' colpi).');
+  }catch(e){ msg('⚠️ Invio non riuscito ('+e.message+'). È salvata sul telefono e partirà da sola appena torna la rete.'); }
   disegnaLista();
 }
 function disegnaLista(){
@@ -312,6 +362,22 @@ $('btScarica').onclick = async () => {
   }catch(e){ $('msgC').textContent='⚠️ '+e.message; }
 };
 
+$('btCancella').onclick = async () => {
+  const conf = prompt('Verrà scaricata una copia e poi CANCELLATO tutto l\'archivio.\nPer confermare scrivi CANCELLA');
+  if((conf||'').trim().toUpperCase()!=='CANCELLA'){ $('msgX').textContent='Annullato: nessun dato cancellato.'; return; }
+  $('msgX').textContent='Scarico la copia di sicurezza…';
+  try{
+    const j=await chiama({action:'scarica',nome:utente,pin});
+    if(!j.ok) throw new Error(j.err);
+    if(j.rows.length<=1){ $('msgX').textContent='L\'archivio è già vuoto.'; return; }
+    scarica(j.rows.map(x=>x.map(q).join(',')).join('\n'),`erg_backup_${new Date().toISOString().slice(0,10)}.csv`);
+    await new Promise(r=>setTimeout(r,1500));
+    const c=await chiama({action:'cancella',nome:utente,pin,conferma:'CANCELLA',righeAttese:j.rows.length-1});
+    if(!c.ok) throw new Error(c.err);
+    $('msgX').textContent='✅ Cancellati '+c.n+' colpi. La copia è nella cartella Download.'; $('riepilogo').innerHTML='';
+  }catch(e){ $('msgX').textContent='⚠️ '+e.message+' – nessun dato cancellato.'; }
+};
+
 // ---------- SIMULAZIONE (prova senza ergometro) ----------
 $('btSim').onclick = () => {
   if(simTimer){ clearInterval(simTimer); simTimer=null; stato('Simulazione ferma',false); $('btSim').textContent='Simulazione'; return; }
@@ -319,7 +385,7 @@ $('btSim').onclick = () => {
   simTimer=setInterval(()=>{
     n++; t+=2.4; const pk=600+Math.random()*250, pos=0.3+Math.random()*0.2, L=34;
     const c=Array.from({length:L},(_,i)=>{const x=i/(L-1); return +(pk*Math.max(0,x<pos?Math.sin(x/pos*Math.PI/2):Math.cos((x-pos)/(1-pos)*Math.PI/2))).toFixed(1)});
-    spm=24+Math.round(Math.random()*3); hr=140+Math.round(Math.random()*15); $('vSpm').textContent=spm;
+    spm=24+Math.round(Math.random()*3); hr=140+Math.round(Math.random()*15); $('vSpm').textContent=spm; $('vHr').textContent=hr;
     const w=Math.round(180+Math.random()*80); dist+=9;
     pendingCurve=c;
     const buf=new DataView(new ArrayBuffer(20)); const set24=(o,v)=>{buf.setUint8(o,v&255);buf.setUint8(o+1,(v>>8)&255);buf.setUint8(o+2,(v>>16)&255)};
@@ -329,6 +395,8 @@ $('btSim').onclick = () => {
     const b2=new DataView(new ArrayBuffer(15)); b2.setUint16(3,w,true); b2.setUint16(7,n,true); onStroke2(b2);
   },2400);
 };
+
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 
 function stato(t,on){ $('stato').textContent=t; if(on!==undefined) $('dot').classList.toggle('on',on); }
 function msg(t){ $('msg').textContent=t; }
