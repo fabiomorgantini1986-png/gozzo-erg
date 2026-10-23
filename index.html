@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b2236">
+<title>Gozzo Erg</title>
+<style>
+:root{--bg:#0b2236;--card:#12324d;--ink:#eef4f8;--mute:#9db4c6;--acc:#ff8a3d;--ok:#4cc38a;--bad:#ff5d5d;--line:#21486a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:16px;padding-bottom:40px}
+h1{font-size:20px;margin:0 0 12px}
+h2{font-size:16px;margin:18px 0 8px;color:var(--mute);font-weight:600}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px}
+button{font:inherit;font-weight:600;border:0;border-radius:12px;padding:14px 16px;background:var(--acc);color:#1b0d02;width:100%;margin-top:8px}
+button.sec{background:var(--line);color:var(--ink)}
+button:disabled{opacity:.4}
+input,select{font:inherit;width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0e2a42;color:var(--ink);margin-top:6px}
+label{font-size:14px;color:var(--mute)}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.big{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.m{background:#0e2a42;border-radius:12px;padding:10px;text-align:center}
+.m b{display:block;font-size:34px;font-variant-numeric:tabular-nums;line-height:1.1}
+.m span{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+canvas{width:100%;height:200px;display:block;background:#0e2a42;border-radius:12px}
+.st{font-size:14px;color:var(--mute)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--bad);margin-right:6px}
+.dot.on{background:var(--ok)}
+.hide{display:none!important}
+.list div{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.warn{color:var(--acc);font-size:14px}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<section id="vLogin">
+  <h1>🚣 Gozzo Erg</h1>
+  <div class="card">
+    <label>Il tuo nome</label>
+    <input id="inNome" list="nomi" placeholder="Es. Laura" autocomplete="off">
+    <datalist id="nomi"></datalist>
+    <button id="btEntra">Entra</button>
+    <p id="noBt" class="warn hide">Questo browser non supporta il Bluetooth web. Usa Chrome su Android (la modalità Simulazione funziona comunque).</p>
+  </div>
+  <div class="card hide">
+    <label>Indirizzo archivio (Google Apps Script)</label>
+    <input id="inUrl" placeholder="https://script.google.com/macros/s/…/exec">
+    <p class="st">Va impostato una volta per telefono. Senza indirizzo i dati restano solo sul telefono (scaricabili in CSV).</p>
+  </div>
+</section>
+
+<!-- VOGATRICE -->
+<section id="vAtleta" class="hide">
+  <div class="row" style="align-items:center"><h1 id="hNome"></h1><button class="sec" id="btEsci" style="flex:0 0 90px;margin:0;padding:8px">Esci</button></div>
+  <div class="card">
+    <div class="st"><span id="dot" class="dot"></span><span id="stato">Non collegato</span></div>
+    <div class="row">
+      <button id="btConn">Collega PM5</button>
+      <button class="sec" id="btSim">Simulazione</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="big">
+      <div class="m"><b id="vW">–</b><span>Watt</span></div>
+      <div class="m"><b id="vSpm">–</b><span>Colpi/min</span></div>
+      <div class="m"><b id="vPk">–</b><span>Picco (N)</span></div>
+      <div class="m"><b id="vPos">–</b><span>Picco a % passata</span></div>
+      <div class="m"><b id="vRat">–</b><span>Media/Picco</span></div>
+      <div class="m"><b id="vLen">–</b><span>Passata (cm)</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <canvas id="cv" width="700" height="300"></canvas>
+    <p class="st" style="margin:6px 0 0">Arancio = ultimo colpo · grigio = media degli ultimi 10</p>
+  </div>
+  <div class="card">
+    <div class="st">Colpi registrati: <b id="vN">0</b> · Tempo <b id="vT">0:00</b></div>
+    <label style="display:block;margin-top:8px">Nota sessione (facoltativa)</label>
+    <input id="inNota" placeholder="Es. 6×8 colpi massimali, damper 6">
+    <div class="row">
+      <button id="btStart" disabled>Inizia</button>
+      <button class="sec" id="btStop" disabled>Fine e salva</button>
+    </div>
+    <p id="msg" class="st"></p>
+  </div>
+  <h2>Le mie sessioni su questo telefono</h2>
+  <div class="card list" id="lista"></div>
+</section>
+
+<!-- ALLENATORE -->
+<section id="vCoach" class="hide">
+  <div class="row" style="align-items:center"><h1>Area allenatore</h1><button class="sec" id="btEsci2" style="flex:0 0 90px;margin:0;padding:8px">Esci</button></div>
+  <div class="card">
+    <label>PIN allenatore</label>
+    <input id="inPin" type="password" inputmode="numeric">
+    <button id="btScarica">Scarica tutti i dati (CSV)</button>
+    <p id="msgC" class="st"></p>
+  </div>
+  <div class="card list" id="riepilogo"></div>
+</section>
+
+<script>
+const ALLENATORE = ['allenatore','fabio','coach'];   // nomi che aprono l'area allenatore
+const UUID = s => `ce06${s}-43e5-11e4-916c-0800200c9a66`;
+const LBS_N = 4.44822;
+const ARCHIVIO = 'https://script.google.com/macros/s/AKfycbwWpEoD0zzUtwhO6qPiGBD6RHDZ3H0mOXZ9O0qnFFzzj2RPAWy_TxtUKqCt9vi_Yz9T9Q/exec';
+const $ = id => document.getElementById(id);
+const ls = {
+  get(k,d){if(k==='url')return ARCHIVIO;try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+};
+
+let utente=null, dev=null, simTimer=null, wake=null;
+let sess=null;               // sessione in registrazione
+let last=null, pendingCurve=null, curveBuf=[], curveSeq=-1, curveTot=0;
+let spm=0, hr=0, ultimi=[];
+
+// ---------- LOGIN ----------
+$('inUrl').value = ls.get('url','');
+$('inUrl').onchange = e => ls.set('url', e.target.value.trim());
+$('nomi').innerHTML = ls.get('nomi',[]).map(n=>`<option value="${n.replace(/"/g,'')}">`).join('');
+if(!navigator.bluetooth) $('noBt').classList.remove('hide');
+$('btEntra').onclick = () => {
+  const n = $('inNome').value.trim(); if(!n) return;
+  ls.set('url', $('inUrl').value.trim());
+  const nomi = ls.get('nomi',[]); if(!nomi.includes(n)){nomi.push(n);ls.set('nomi',nomi)}
+  ls.set('utente', n); entra(n);
+};
+function entra(n){
+  utente=n; $('vLogin').classList.add('hide');
+  if(ALLENATORE.includes(n.toLowerCase())){ $('vCoach').classList.remove('hide'); return; }
+  $('vAtleta').classList.remove('hide'); $('hNome').textContent=n; disegnaLista(); disegna();
+}
+function esci(){ if(sess) return alert('Termina prima la sessione.'); ls.set('utente',null); location.reload(); }
+$('btEsci').onclick=esci; $('btEsci2').onclick=esci;
+const u0=ls.get('utente',null); if(u0) entra(u0);
+
+// ---------- BLUETOOTH PM5 ----------
+$('btConn').onclick = async () => {
+  if(!navigator.bluetooth) return alert('Bluetooth web non disponibile: usa Chrome su Android.');
+  try{
+    stato('Ricerca PM5…');
+    dev = await navigator.bluetooth.requestDevice({
+      filters:[{namePrefix:'PM5'}],
+      optionalServices:[UUID('0030'),UUID('0010'),UUID('0020')]
+    });
+    dev.addEventListener('gattserverdisconnected', ()=>{stato('Disconnesso – ricollega',false)});
+    const gatt = await dev.gatt.connect();
+    const svc = await gatt.getPrimaryService(UUID('0030'));
+    try{ const r = await svc.getCharacteristic(UUID('0034')); await r.writeValue(new Uint8Array([1])); }catch(e){} // aggiornamenti ogni 500 ms
+    await notifica(svc,'0032',onStatus);
+    await notifica(svc,'0035',onStroke);
+    await notifica(svc,'0036',onStroke2);
+    try{ await notifica(svc,'003d',onCurve); }catch(e){ msg('Curva di forza non disponibile (serve PM5 con logo verde e firmware aggiornato).'); }
+    stato('Collegato a '+(dev.name||'PM5'),true); $('btStart').disabled=false;
+  }catch(e){ stato('Errore: '+e.message,false); }
+};
+async function notifica(svc,id,fn){
+  const c = await svc.getCharacteristic(UUID(id));
+  c.addEventListener('characteristicvaluechanged', ev=>fn(ev.target.value));
+  await c.startNotifications();
+}
+const u24=(d,o)=>d.getUint8(o)|(d.getUint8(o+1)<<8)|(d.getUint8(o+2)<<16);
+
+function onStatus(d){ spm=d.getUint8(5); const h=d.getUint8(6); hr=h===255?0:h; $('vSpm').textContent=spm||'–'; }
+
+function onStroke(d){            // 0x0035: dati del colpo
+  const n=d.getUint16(18,true);
+  const k={n, t:u24(d,0)/100, dist:u24(d,3)/10, lung:d.getUint8(6)/100, drive:d.getUint8(7)/100,
+    rec:d.getUint16(8,true)/100, dpc:d.getUint16(10,true)/100,
+    picco:+(d.getUint16(12,true)/10*LBS_N).toFixed(1), media:+(d.getUint16(14,true)/10*LBS_N).toFixed(1),
+    lavoro:d.getUint16(16,true)/10, spm, fc:hr, watt:null, curva:null, at:Date.now()};
+  if(last && last.n===n){ Object.assign(last,k,{watt:last.watt,curva:last.curva}); }
+  else { if(last) chiudiColpo(last); last=k; }
+  if(pendingCurve && !last.curva){ last.curva=pendingCurve; pendingCurve=null; }
+  mostra(last);
+}
+function onStroke2(d){           // 0x0036: potenza del colpo
+  const w=d.getUint16(3,true), n=d.getUint16(7,true);
+  if(last && last.n===n){ last.watt=w; mostra(last); }
+  $('vW').textContent=w;
+}
+function onCurve(d){             // 0x003D: curva di forza a pacchetti
+  const h=d.getUint8(0), tot=h>>4, nw=h&15, seq=d.getUint8(1);
+  if(seq===0 || curveSeq<0 || seq!==curveSeq+1 && curveBuf.length===0){ curveBuf=[]; }
+  curveSeq=seq; curveTot=tot;
+  for(let i=0;i<nw;i++) if(2+i*2+1<d.byteLength) curveBuf.push(+(d.getUint16(2+i*2,true)*LBS_N).toFixed(1));
+  if(nw<9 || (tot && (seq+1)%tot===0)) chiudiCurva();
+}
+function chiudiCurva(){
+  if(curveBuf.length<3){ curveBuf=[]; return; }
+  const c=curveBuf; curveBuf=[]; curveSeq=-1;
+  if(last && !last.curva && Date.now()-last.at<2500){ last.curva=c; mostra(last); } else pendingCurve=c;
+}
+
+// ---------- METRICHE ----------
+function deriva(k){
+  if(k.curva && k.curva.length>2){
+    const c=k.curva, mx=Math.max(...c), i=c.indexOf(mx), avg=c.reduce((a,b)=>a+b,0)/c.length;
+    k.posPicco=Math.round(i/(c.length-1)*100);
+    k.rapporto=+(avg/mx).toFixed(2);
+    if(!k.picco) k.picco=mx;
+  } else if(k.picco && k.media){ k.rapporto=+(k.media/k.picco).toFixed(2); }
+  return k;
+}
+function mostra(k){
+  deriva(k);
+  $('vPk').textContent=k.picco?Math.round(k.picco):'–';
+  $('vPos').textContent=k.posPicco!=null?k.posPicco+'%':'–';
+  $('vRat').textContent=k.rapporto??'–';
+  $('vLen').textContent=k.lung?Math.round(k.lung*100):'–';
+  if(k.watt!=null) $('vW').textContent=k.watt;
+  disegna();
+}
+function chiudiColpo(k){
+  deriva(k);
+  if(k.curva){ ultimi.push(k.curva); if(ultimi.length>10) ultimi.shift(); }
+  if(sess){ const {at,...r}=k; sess.colpi.push(r); $('vN').textContent=sess.colpi.length; }
+}
+
+// ---------- GRAFICO CURVA ----------
+function ricampiona(c,n){ return Array.from({length:n},(_,i)=>{const x=i/(n-1)*(c.length-1),a=Math.floor(x),b=Math.min(a+1,c.length-1);return c[a]+(c[b]-c[a])*(x-a)}); }
+function disegna(){
+  const cv=$('cv'), g=cv.getContext('2d'), W=cv.width, H=cv.height, P=30;
+  g.clearRect(0,0,W,H);
+  const cur=last&&last.curva, media=ultimi.length?ricampiona(ultimi[0],50).map((_,i)=>ultimi.reduce((s,c)=>s+ricampiona(c,50)[i],0)/ultimi.length):null;
+  const mx=Math.max(100,...(cur||[0]),...(media||[0]))*1.1;
+  g.strokeStyle='#21486a'; g.lineWidth=1; g.fillStyle='#9db4c6'; g.font='18px system-ui';
+  for(let v=0;v<=mx;v+=Math.ceil(mx/4/100)*100){ const y=H-P-(v/mx)*(H-2*P); g.beginPath(); g.moveTo(P,y); g.lineTo(W-8,y); g.stroke(); g.fillText(v,2,y-2); }
+  const linea=(c,col,w)=>{ g.strokeStyle=col; g.lineWidth=w; g.beginPath(); c.forEach((v,i)=>{const x=P+i/(c.length-1)*(W-P-8), y=H-P-(v/mx)*(H-2*P); i?g.lineTo(x,y):g.moveTo(x,y)}); g.stroke(); };
+  if(media) linea(media,'#6f8aa0',3);
+  if(cur){ linea(cur,'#ff8a3d',5);
+    const i=cur.indexOf(Math.max(...cur)), x=P+i/(cur.length-1)*(W-P-8);
+    g.strokeStyle='#ff8a3d'; g.setLineDash([6,6]); g.lineWidth=2; g.beginPath(); g.moveTo(x,P); g.lineTo(x,H-P); g.stroke(); g.setLineDash([]); }
+  g.fillStyle='#9db4c6'; g.fillText('inizio passata',P,H-6); g.fillText('fine',W-50,H-6);
+}
+
+// ---------- SESSIONE ----------
+$('btStart').onclick = async () => {
+  sess={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6), atleta:utente, inizio:new Date().toISOString(), nota:'', colpi:[]};
+  ultimi=[]; $('vN').textContent=0; $('btStart').disabled=true; $('btStop').disabled=false; msg('Registrazione in corso…');
+  try{ wake=await navigator.wakeLock?.request('screen'); }catch(e){}
+  const t0=Date.now(); sess.timer=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('vT').textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0')},1000);
+};
+$('btStop').onclick = async () => {
+  if(last) { chiudiColpo(last); last=null; }
+  clearInterval(sess.timer); delete sess.timer; sess.nota=$('inNota').value.trim(); sess.fine=new Date().toISOString();
+  const s=sess; sess=null; try{wake?.release()}catch(e){}
+  $('btStop').disabled=true; $('btStart').disabled=!(dev?.gatt?.connected||simTimer);
+  if(!s.colpi.length){ msg('Nessun colpo registrato.'); return; }
+  s.inviata=false; const arr=ls.get('sessioni',[]); arr.unshift(s); ls.set('sessioni',arr.slice(0,40));
+  await invia(s.id); disegnaLista();
+};
+async function invia(id){
+  const url=ls.get('url',''); const arr=ls.get('sessioni',[]); const s=arr.find(x=>x.id===id);
+  if(!url){ msg('Salvata sul telefono. Nessun archivio impostato: scarica il CSV.'); return; }
+  msg('Invio all\'archivio…');
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({session:s})});
+    const j=await r.json(); if(!j.ok) throw new Error(j.err||'errore');
+    s.inviata=true; ls.set('sessioni',arr); msg('✅ Sessione inviata ('+s.colpi.length+' colpi).');
+  }catch(e){ msg('⚠️ Invio non riuscito ('+e.message+'). È salvata sul telefono: riprova dalla lista.'); }
+  disegnaLista();
+}
+function disegnaLista(){
+  const arr=ls.get('sessioni',[]).filter(s=>s.atleta===utente);
+  $('lista').innerHTML = arr.length? '' : '<div>Nessuna sessione.</div>';
+  arr.forEach(s=>{
+    const d=document.createElement('div'); const dt=new Date(s.inizio);
+    d.innerHTML=`<b>${dt.toLocaleDateString('it-IT')} ${dt.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</b> · ${s.colpi.length} colpi ${s.inviata?'· ✅ inviata':'· ⏳ non inviata'}<br>`;
+    d.querySelector('b').after(document.createTextNode(s.nota?' – '+s.nota:''));
+    const r=document.createElement('div'); r.className='row'; r.style.border='0';
+    const b1=document.createElement('button'); b1.className='sec'; b1.textContent='CSV'; b1.onclick=()=>scarica(csvSessioni([s]),`erg_${s.atleta}_${s.inizio.slice(0,10)}.csv`);
+    r.append(b1);
+    if(!s.inviata){ const b2=document.createElement('button'); b2.textContent='Reinvia'; b2.onclick=()=>invia(s.id); r.append(b2); }
+    d.append(r); $('lista').append(d);
+  });
+}
+
+// ---------- CSV ----------
+const COL=['sessione','atleta','inizio','nota','colpo','tempo_s','distanza_m','cadenza','watt','picco_N','media_N','media_su_picco','pos_picco_pct','lung_passata_m','drive_s','recupero_s','dist_colpo_m','lavoro_J','fc','curva_N'];
+const q=v=>{v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+function csvSessioni(arr){
+  const r=[COL.join(',')];
+  arr.forEach(s=>s.colpi.forEach(k=>r.push([s.id,s.atleta,s.inizio,s.nota,k.n,k.t,k.dist,k.spm,k.watt,k.picco,k.media,k.rapporto,k.posPicco,k.lung,k.drive,k.rec,k.dpc,k.lavoro,k.fc,(k.curva||[]).join('|')].map(q).join(','))));
+  return r.join('\n');
+}
+function scarica(txt,nome){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/csv'})); a.download=nome; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),5000); }
+
+// ---------- ALLENATORE ----------
+$('btScarica').onclick = async () => {
+  const url=ls.get('url','')||$('inUrl').value.trim();
+  if(!url){ $('msgC').textContent='Imposta prima l\'indirizzo archivio nella schermata di accesso.'; return; }
+  $('msgC').textContent='Scarico…';
+  try{
+    const r=await fetch(url+'?pin='+encodeURIComponent($('inPin').value)); const j=await r.json();
+    if(!j.ok) throw new Error(j.err);
+    const righe=j.rows; scarica(righe.map(x=>x.map(q).join(',')).join('\n'),`erg_tutte_${new Date().toISOString().slice(0,10)}.csv`);
+    const sess={}; righe.slice(1).forEach(x=>{const k=x[0]; sess[k]=sess[k]||{a:x[1],i:x[2],n:0,w:0,p:0}; sess[k].n++; sess[k].w=Math.max(sess[k].w,+x[8]||0); sess[k].p=Math.max(sess[k].p,+x[9]||0);});
+    $('msgC').textContent=`✅ ${righe.length-1} colpi, ${Object.keys(sess).length} sessioni. File scaricato: mandalo a Claude per le analisi.`;
+    $('riepilogo').innerHTML=''; Object.values(sess).sort((a,b)=>b.i.localeCompare(a.i)).forEach(s=>{const d=document.createElement('div'); d.textContent=`${new Date(s.i).toLocaleDateString('it-IT')} · ${s.a} · ${s.n} colpi · max ${s.w} W · picco ${Math.round(s.p)} N`; $('riepilogo').append(d);});
+  }catch(e){ $('msgC').textContent='⚠️ '+e.message; }
+};
+
+// ---------- SIMULAZIONE (prova senza ergometro) ----------
+$('btSim').onclick = () => {
+  if(simTimer){ clearInterval(simTimer); simTimer=null; stato('Simulazione ferma',false); $('btSim').textContent='Simulazione'; return; }
+  let n=0,t=0,dist=0; stato('Simulazione attiva',true); $('btSim').textContent='Ferma sim.'; $('btStart').disabled=!!sess;
+  simTimer=setInterval(()=>{
+    n++; t+=2.4; const pk=600+Math.random()*250, pos=0.3+Math.random()*0.2, L=34;
+    const c=Array.from({length:L},(_,i)=>{const x=i/(L-1); return +(pk*Math.max(0,x<pos?Math.sin(x/pos*Math.PI/2):Math.cos((x-pos)/(1-pos)*Math.PI/2))).toFixed(1)});
+    spm=24+Math.round(Math.random()*3); hr=140+Math.round(Math.random()*15); $('vSpm').textContent=spm;
+    const w=Math.round(180+Math.random()*80); dist+=9;
+    pendingCurve=c;
+    const buf=new DataView(new ArrayBuffer(20)); const set24=(o,v)=>{buf.setUint8(o,v&255);buf.setUint8(o+1,(v>>8)&255);buf.setUint8(o+2,(v>>16)&255)};
+    set24(0,Math.round(t*100)); set24(3,Math.round(dist*10)); buf.setUint8(6,135); buf.setUint8(7,85); buf.setUint16(8,155,true); buf.setUint16(10,900,true);
+    buf.setUint16(12,Math.round(pk/LBS_N*10),true); buf.setUint16(14,Math.round(pk*0.55/LBS_N*10),true); buf.setUint16(16,4000,true); buf.setUint16(18,n,true);
+    onStroke(buf);
+    const b2=new DataView(new ArrayBuffer(15)); b2.setUint16(3,w,true); b2.setUint16(7,n,true); onStroke2(b2);
+  },2400);
+};
+
+function stato(t,on){ $('stato').textContent=t; if(on!==undefined) $('dot').classList.toggle('on',on); }
+function msg(t){ $('msg').textContent=t; }
+</script>
+</body>
+</html>
